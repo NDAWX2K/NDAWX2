@@ -1,0 +1,63 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Barry M. Goldwater Range — approximate context area",
+        "color": "#65131b",
+        "note": "Broad illustrative context around the Barry M. Goldwater Range in southwest Arizona."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-113.25, 33.20],
+          [-112.25, 33.20],
+          [-112.10, 32.20],
+          [-113.10, 31.90],
+          [-114.05, 32.20],
+          [-113.90, 32.90],
+          [-113.25, 33.20]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Luke / western Phoenix military activity context — approximate",
+        "color": "#7c2530",
+        "note": "Broad illustrative context near Luke AFB and western Phoenix. It is not controlled airspace geometry."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-112.90, 34.05],
+          [-112.15, 34.05],
+          [-112.00, 33.40],
+          [-112.55, 33.25],
+          [-113.00, 33.55],
+          [-112.90, 34.05]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Yuma military aviation context — approximate",
+        "color": "#8d3940",
+        "note": "Broad illustrative context around Yuma-area military aviation activity and adjacent desert training areas."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-114.85, 33.10],
+          [-114.25, 33.10],
+          [-114.10, 32.30],
+          [-114.70, 32.15],
+          [-115.00, 32.45],
+          [-114.85, 33.10]
+        ]]
+      }
+    }
+  ]
+}

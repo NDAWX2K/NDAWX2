@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- Basic document and mobile-layout metadata -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="NDAWX — public Arizona weather awareness dashboard.">
+  <title>NDAWX | Arizona Weather Awareness</title>
+
+  <!-- Leaflet map styles and JavaScript -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha512-p4NxAoJBhIINfQ4xF8u2OQp2ETbVQ5YDXRPaF8DkrGC7Oqj44kFCB+c7j7hG2R8oDAZK5mY9R+6KZV5Q2Qj2Zw=="
+    crossorigin=""
+  >
+
+  <style>
+    /* NDAWX design system: restrained military/weather briefing styling, dark-red primary color. */
+    :root {
+      --ink: #152026;
+      --muted: #64727a;
+      --paper: #f3f5f4;
+      --panel: #ffffff;
+      --line: #d8dedc;
+      --red: #65131b;
+      --red-dark: #3f0b11;
+      --red-soft: #f4e6e7;
+      --blue: #125f87;
+      --green: #256a4b;
+      --warning: #8b5a0a;
+      --shadow: 0 8px 24px rgba(20, 32, 38, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    /* Full-width site header, intentionally using page space rather than a compact card layout. */
+    .site-header {
+      background: linear-gradient(105deg, var(--red-dark), var(--red));
+      color: #fff;
+      min-height: 112px;
+      padding: 20px clamp(18px, 4vw, 64px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+      border-bottom: 4px solid #a13b42;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand-mark {
+      width: 52px;
+      height: 52px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      font-family: Georgia, serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -1px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      margin-bottom: 2px;
+      letter-spacing: 0.04em;
+      font-size: clamp(1.55rem, 3vw, 2.2rem);
+    }
+
+    .tagline {
+      margin: 0;
+      color: #f4dfe0;
+      max-width: 760px;
+    }
+
+    .header-status {
+      min-width: 205px;
+      padding-left: 20px;
+      border-left: 1px solid rgba(255, 255, 255, 0.35);
+      font-size: 0.86rem;
+      color: #f8e9ea;
+    }
+
+    .header-status strong {
+      color: #fff;
+      display: block;
+      margin-top: 5px;
+    }
+
+    /* Main layout makes the map the primary visual element. */
+    main { padding: 20px clamp(14px, 3vw, 42px) 40px; }
+
+    .control-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .control-strip label {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      cursor: pointer;
+      font-size: 0.92rem;
+      font-weight: 650;
+    }
+
+    .control-strip input { accent-color: var(--red); }
+
+    button {
+      cursor: pointer;
+      border: 0;
+      background: var(--red);
+      color: #fff;
+      font-weight: 750;
+      padding: 9px 13px;
+      border-radius: 3px;
+    }
+
+    button:hover { background: var(--red-dark); }
+    button:focus-visible, input:focus-visible { outline: 3px solid #d39ba0; outline-offset: 2px; }
+
+    .map-shell {
+      position: relative;
+      border: 1px solid #bcc6c4;
+      box-shadow: var(--shadow);
+      background: #dce6e1;
+    }
+
+    /* Large desktop map; map adapts to viewport height on smaller devices. */
+    #map {
+      height: min(69vh, 760px);
+      min-height: 490px;
+      width: 100%;
+    }
+
+    .map-note {
+      position: absolute;
+      z-index: 500;
+      bottom: 14px;
+      left: 14px;
+      max-width: 370px;
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.93);
+      border-left: 4px solid var(--red);
+      font-size: 0.77rem;
+      line-height: 1.35;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1fr;
+      gap: 18px;
+      margin-top: 20px;
+    }
+
+    .wide-panel { grid-column: span 2; }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .panel h2 {
+      color: var(--red-dark);
+      font-size: 1.02rem;
+      margin-bottom: 10px;
+      letter-spacing: 0.015em;
+    }
+
+    .panel h3 {
+      font-size: 0.92rem;
+      margin: 13px 0 6px;
+    }
+
+    .minor {
+      color: var(--muted);
+      font-size: 0.83rem;
+      line-height: 1.45;
+    }
+
+    .station-list, .forecast-list, .synoptic-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .station-list li, .forecast-list li, .synoptic-list li {
+      border-top: 1px solid #e6eae8;
+      padding: 10px 0;
+      line-height: 1.4;
+      font-size: 0.88rem;
+    }
+
+    .station-list li:first-child,
+    .forecast-list li:first-child,
+    .synoptic-list li:first-child {
+      border-top: 0;
+    }
+
+    .station-code {
+      color: var(--red);
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .model-summary {
+      padding: 11px;
+      background: #f5f8f7;
+      border-left: 4px solid var(--green);
+      line-height: 1.48;
+      font-size: 0.9rem;
+    }
+
+    .fact {
+      color: #283b45;
+      background: #edf4f8;
+      border-left: 4px solid var(--blue);
+      padding: 12px;
+      line-height: 1.45;
+      font-size: 0.92rem;
+    }
+
+    .error {
+      color: #8d1720;
+      background: #fff1f2;
+      border-left: 4px solid #b52934;
+      padding: 10px;
+      font-size: 0.86rem;
+    }
+
+    footer {
+      padding: 20px clamp(14px, 3vw, 42px) 32px;
+      color: #4f5e64;
+      font-size: 0.78rem;
+      line-height: 1.55;
+    }
+
+    footer a { color: var(--red); }
+
+    /* Leaflet station wind arrow icon. */
+    .wind-arrow {
+      background: transparent;
+      border: 0;
+      color: #18282e;
+      font-size: 21px;
+      font-weight: 900;
+      text-align: center;
+      text-shadow: 0 1px 2px #fff;
+    }
+
+    .wind-arrow span {
+      display: inline-block;
+      transform-origin: center;
+    }
+
+    .county-bubble {
+      color: #291014;
+      background: #fff9f4;
+      border: 1px solid var(--red);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 5px;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1050px) {
+      .dashboard-grid { grid-template-columns: 1fr 1fr; }
+      .wide-panel { grid-column: span 2; }
+    }
+
+    @media (max-width: 700px) {
+      .site-header { align-items: flex-start; flex-direction: column; }
+      .header-status { border-left: 0; border-top: 1px solid rgba(255,255,255,0.35); padding: 10px 0 0; }
+      #map { min-height: 420px; height: 61vh; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .wide-panel { grid-column: span 1; }
+      .map-note { right: 14px; max-width: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div class="brand-mark">NDA</div>
+      <div>
+        <h1>NDAWX</h1>
+        <p class="tagline">Non-Disclosure Agreement Weather — because weather knowledge belongs to everyone.</p>
+      </div>
+    </div>
+    <div class="header-status">
+      Last dashboard refresh
+      <strong id="lastUpdated">Loading weather feeds…</strong>
+    </div>
+  </header>
+
+  <main>
+    <section class="control-strip" aria-label="Map overlay controls">
+      <button id="refreshButton" type="button">Refresh live data</button>
+      <label><input id="obsToggle" type="checkbox" checked> Observed METAR stations</label>
+      <label><input id="modelToggle" type="checkbox" checked> Model temperature field</label>
+      <label><input id="radarToggle" type="checkbox"> Low-resolution radar</label>
+      <label><input id="rangesToggle" type="checkbox"> Approximate flight/range areas</label>
+      <label><input id="countyToggle" type="checkbox"> Local diurnal effects — 12 counties</label>
+    </section>
+
+    <section class="map-shell" aria-label="Interactive Arizona weather map">
+      <div id="map"></div>
+      <div class="map-note">
+        <strong>Awareness only:</strong> model colors are a simple HRRR/GFS/NAM station-average visualization, not an official forecast grid.
+        Military/range geometry is approximate and must not be used for navigation or airspace clearance.
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel">
+        <h2>Daily cool weather fact</h2>
+        <div id="weatherFact" class="fact">Loading today’s fact…</div>
+        <p class="minor">Facts rotate deterministically by calendar day; no generative text is used.</p>
+      </article>
+
+      <article class="panel">
+        <h2>Previous 24 hours — METAR</h2>
+        <p class="minor">Station high/low and strongest reported sustained wind from the Aviation Weather Center feed.</p>
+        <ul id="previous24" class="station-list"><li>Loading observations…</li></ul>
+      </article>
+
+      <article class="panel">
+        <h2>Model outlook</h2>
+        <div id="modelSummary" class="model-summary">Loading HRRR, GFS, and NAM data…</div>
+        <p class="minor">The display uses an equal-weight arithmetic average where all model values are available. It is not an official ensemble product.</p>
+      </article>
+
+      <article class="panel wide-panel">
+        <h2>Arizona forecast summaries</h2>
+        <p class="minor">The first forecast period returned by the National Weather Service for each station point.</p>
+        <ul id="nwsForecasts" class="forecast-list"><li>Loading NWS point forecasts…</li></ul>
+      </article>
+
+      <article class="panel">
+        <h2>CONUS synoptic snapshot</h2>
+        <p class="minor">A three-part, NWS-derived forecast/observation-oriented snapshot using representative western, central, and eastern U.S. forecast points.</p>
+        <ul id="synoptic" class="synoptic-list"><li>Loading regional summaries…</li></ul>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <strong>NDAWX data notes.</strong>
+    Aviation observations: Aviation Weather Center. Forecast summaries: National Weather Service.
+    Model values: Open-Meteo access to HRRR CONUS, GFS Seamless, and NAM CONUS. Radar overlay: Iowa Environmental Mesonet NEXRAD WMS.
+    Refreshing automatically occurs every 15 minutes while the page remains open. This site is not an FAA-approved briefing source.
+  </footer>
+
+  <!-- Leaflet mapping library and Leaflet heat-field plugin -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <script>
+    /*
+      NDAWX is intentionally a static browser application:
+      - No AI/LLM calls.
+      - No Python.
+      - No server-side processing.
+      - All live information is fetched from public weather APIs at page runtime.
+    */
+
+    // Requested Arizona and nearby operational METAR stations.
+    const STATIONS = [
+      { id: 'KLUF', name: 'Luke AFB', lat: 33.535, lon: -112.383 },
+      { id: 'KIWA', name: 'Phoenix–Mesa Gateway', lat: 33.307, lon: -111.655 },
+      { id: 'KPHX', name: 'Phoenix Sky Harbor', lat: 33.435, lon: -112.011 },
+      { id: 'KGXF', name: 'Gila Bend AFAF', lat: 32.888, lon: -112.720 },
+      { id: 'KDMA', name: 'Davis–Monthan AFB', lat: 32.166, lon: -110.883 },
+      { id: 'KLSV', name: 'Nellis AFB', lat: 36.236, lon: -115.034 },
+      { id: 'KNYL', name: 'Yuma MCAS', lat: 32.657, lon: -114.606 },
+      { id: 'KGYR', name: 'Goodyear', lat: 33.423, lon: -112.375 },
+      { id: 'KFLG', name: 'Flagstaff Pulliam', lat: 35.138, lon: -111.671 },
+      { id: 'KPRC', name: 'Prescott', lat: 34.655, lon: -112.420 }
+    ];
+
+    // Twelve county-area anchors and concise local diurnal behavior descriptions.
+    // These are climatological/local-terrain awareness notes, not forecasts.
+    const COUNTY_EFFECTS = [
+      { county: 'Maricopa', lat: 33.48, lon: -112.08, text: 'Urban heat retention commonly slows nighttime cooling; outflow boundaries can redirect winds.' },
+      { county: 'Pima', lat: 32.16, lon: -110.88, text: 'Desert heating favors strong afternoon mixing; nearby terrain can focus thunderstorm outflows.' },
+      { county: 'Yuma', lat: 32.69, lon: -114.63, text: 'Very strong daytime heating is common; Colorado River moisture and outflows can locally modify conditions.' },
+      { county: 'Pinal', lat: 32.90, lon: -111.34, text: 'Open desert allows broad daytime mixing; evening drainage and outflow boundaries can be locally important.' },
+      { county: 'Mohave', lat: 35.21, lon: -113.76, text: 'Plateau and river-valley terrain supports elevation-driven temperature contrasts and localized afternoon gusts.' },
+      { county: 'Coconino', lat: 35.37, lon: -111.70, text: 'High elevation produces cooler nights, frequent terrain circulations, and a greater cold-season snow/ice concern.' },
+      { county: 'Yavapai', lat: 34.63, lon: -112.43, text: 'Complex terrain supports drainage flows overnight and terrain-enhanced wind shifts during frontal passages.' },
+      { county: 'Gila', lat: 33.82, lon: -110.81, text: 'Rim and basin terrain can separate valley temperatures from higher terrain and channel local winds.' },
+      { county: 'Navajo', lat: 35.40, lon: -110.14, text: 'High-desert cooling can be substantial overnight; terrain and elevated plateau exposure favor gusty conditions.' },
+      { county: 'Cochise', lat: 31.88, lon: -109.75, text: 'Southeast Arizona terrain can channel winds; summer convection may cause rapid outflow wind and visibility changes.' },
+      { county: 'Graham', lat: 32.93, lon: -109.89, text: 'Mountain-valley contrast favors upslope/downslope circulations and sharp temperature differences over short distances.' },
+      { county: 'Santa Cruz', lat: 31.53, lon: -110.85, text: 'Borderland valleys can channel winds; terrain can influence moisture transport and thunderstorm outflow paths.' }
+    ];
+
+    // Deterministic daily weather facts. No generative-AI workflow is involved.
+    const WEATHER_FACTS = [
+      'METAR temperature and dew point are conventionally reported in degrees Celsius, even at U.S. stations.',
+      'A wind direction describes where the wind is coming from; a north wind blows from north toward south.',
+      'Radar reflectivity measures returned energy from precipitation targets; it does not directly measure rainfall at the ground.',
+      'Clear, dry nights commonly cool faster because there are fewer clouds and less water vapor to limit infrared heat loss.',
+      'Mountain valleys often develop downslope or drainage winds at night as air near slopes cools and becomes denser.',
+      'Higher daytime temperatures can increase density altitude, reducing aircraft performance compared with cooler conditions.',
+      'A frontal passage commonly changes temperature, wind direction, cloud cover, and precipitation chances together.',
+      'Dew point is often more useful than relative humidity for comparing the actual amount of moisture in two air masses.',
+      'Temperature inversions can trap smoke, haze, and cooler air near the ground until daytime mixing erodes the inversion.',
+      'Thunderstorm outflow boundaries can produce abrupt wind shifts, gusts, dust, and temperature drops far from the parent storm.'
+    ];
+
+    // Initialize a broad Arizona-centered map with practical scroll/pinch zoom behavior.
+    const map = L.map('map', { scrollWheelZoom: true }).setView([34.25, -111.75], 7);
+
+    const streetBase = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }
+    ).addTo(map);
+
+    const topoBase = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, attribution: 'Tiles &copy; Esri' }
+    );
+
+    L.control.layers(
+      { 'Street map': streetBase, 'Topographic map': topoBase },
+      {},
+      { collapsed: true }
+    ).addTo(map);
+
+    // Separate layers let each map checkbox be independently enabled and disabled.
+    const observationLayer = L.layerGroup().addTo(map);
+    const windLayer = L.layerGroup().addTo(map);
+    const countyLayer = L.layerGroup();
+    const rangeLayer = L.layerGroup();
+
+    // Low-resolution radar is intentionally optional because image overlays can obscure observations.
+    const radarLayer = L.tileLayer.wms(
+      'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi',
+      {
+        layers: 'nexrad-n0r-900913',
+        format: 'image/png',
+        transparent: true,
+        opacity: 0.48,
+        attribution: 'NEXRAD radar: Iowa Environmental Mesonet'
+      }
+    );
+
+    // This heat layer represents temperature variation inferred from station-level model estimates.
+    const modelTemperatureLayer = L.heatLayer([], {
+      radius: 66,
+      blur: 46,
+      maxZoom: 9,
+      minOpacity: 0.30,
+      gradient: {
+        0.00: '#234c8f',
+        0.25: '#35a9db',
+        0.48: '#8fcf78',
+        0.67: '#f1ce54',
+        0.84: '#db6b29',
+        1.00: '#941e29'
+      }
+    }).addTo(map);
+
+    // Common safe fetch helper: API failure remains visible in the dashboard rather than silently inventing data.
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      return response.json();
+    }
+
+    function cToF(value) {
+      return Number.isFinite(Number(value)) ? (Number(value) * 9 / 5) + 32 : null;
+    }
+
+    function average(values) {
+      const valid = values.filter(Number.isFinite);
+      return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+    }
+
+    function circularAverage(degrees) {
+      const valid = degrees.filter(Number.isFinite);
+      if (!valid.length) return null;
+      const x = average(valid.map(value => Math.cos(value * Math.PI / 180)));
+      const y = average(valid.map(value => Math.sin(value * Math.PI / 180)));
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function tempColor(fahrenheit) {
+      if (!Number.isFinite(fahrenheit)) return '#6d777b';
+      if (fahrenheit < 32) return '#365ca8';
+      if (fahrenheit < 50) return '#3b9dcc';
+      if (fahrenheit < 68) return '#71b86b';
+      if (fahrenheit < 82) return '#dcc84d';
+      if (fahrenheit < 96) return '#d5722b';
+      return '#a8202b';
+    }
+
+    function timeValue(observation) {
+      // AWC can return epoch seconds; this also accommodates ISO date strings if supplied.
+      if (Number.isFinite(Number(observation.obsTime))) return Number(observation.obsTime) * 1000;
+      return Date.parse(observation.obsTime || observation.reportTime || '') || 0;
+    }
+
+    function setMessage(elementId, message, isError = false) {
+      document.getElementById(elementId).innerHTML =
+        `<div class="${isError ? 'error' : 'minor'}">${message}</div>`;
+    }
+
+    // Pull all specified METAR stations over the prior 24 hours in one AWC API request.
+    async function loadMetars() {
+      const ids = STATIONS.map(station => station.id).join(',');
+      const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json&hours=24`;
+      const records = await fetchJson(url);
+
+      const byStation = Object.fromEntries(STATIONS.map(station => [station.id, []]));
+      records.forEach(record => {
+        const code = record.icaoId || record.icao || record.stationId;
+        if (byStation[code]) byStation[code].push(record);
+      });
+
+      Object.values(byStation).forEach(recordsForStation => recordsForStation.sort((a, b) => timeValue(a) - timeValue(b)));
+      return byStation;
+    }
+
+    // Request each named operational model. Multiple coordinates are passed in a single request per model.
+    async function loadModel(modelName) {
+      const latitudes = STATIONS.map(station => station.lat).join(',');
+      const longitudes = STATIONS.map(station => station.lon).join(',');
+      const url =
+        'https://api.open-meteo.com/v1/forecast?' +
+        `latitude=${latitudes}&longitude=${longitudes}` +
+        '&current=temperature_2m,wind_speed_10m,wind_direction_10m' +
+        '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m' +
+        '&temperature_unit=fahrenheit&wind_speed_unit=mph' +
+        '&timezone=America%2FPhoenix&forecast_hours=18' +
+        `&models=${encodeURIComponent(modelName)}`;
+
+      const response = await fetchJson(url);
+      return Array.isArray(response) ? response : [response];
+    }
+
+    // Build transparent equal-weight model statistics only from models that returned valid values.
+    async function loadModels() {
+      const modelNames = ['hrrr_conus', 'gfs_seamless', 'nam_conus'];
+      const settled = await Promise.allSettled(modelNames.map(loadModel));
+      const available = settled
+        .filter(result => result.status === 'fulfilled')
+        .map((result, index) => ({ name: modelNames[index], data: result.value }));
+
+      if (!available.length) throw new Error('No model feed returned usable data.');
+
+      return STATIONS.map((station, index) => {
+        const samples = available.map(model => {
+          const point = model.data[index] || {};
+          return {
+            model: model.name,
+            temp: Number(point.current?.temperature_2m),
+            wind: Number(point.current?.wind_speed_10m),
+            direction: Number(point.current?.wind_direction_10m),
+            sixHourTemp: Number(point.hourly?.temperature_2m?.[6])
+          };
+        });
+
+        return {
+          station,
+          modelsUsed: samples.filter(sample => Number.isFinite(sample.temp)).map(sample => sample.model),
+          temperature: average(samples.map(sample => sample.temp)),
+          windSpeed: average(samples.map(sample => sample.wind)),
+          windDirection: circularAverage(samples.map(sample => sample.direction)),
+          sixHourTemperature: average(samples.map(sample => sample.sixHourTemp))
+        };
+      });
+    }
+
+    // Plot observed METAR station temperature markers and model-estimated wind arrows.
+    function renderMap(metarsByStation, modelRows) {
+      observationLayer.clearLayers();
+      windLayer.clearLayers();
+
+      const modelById = Object.fromEntries(modelRows.map(row => [row.station.id, row]));
+      const heatPoints = [];
+
+      STATIONS.forEach(station => {
+        const reports = metarsByStation[station.id] || [];
+        const latest = reports[reports.length - 1];
+        const model = modelById[station.id];
+        const observedTemp = latest ? cToF(latest.temp) : null;
+        const observedWind = latest ? Number(latest.wspd) : null;
+        const observedDirection = latest ? Number(latest.wdir) : null;
+
+        // Colored observation circle uses the actual reported METAR temperature.
+        L.circleMarker([station.lat, station.lon], {
+          radius: 8,
+          color: '#17252a',
+          weight: 1.2,
+          fillColor: tempColor(observedTemp),
+          fillOpacity: 0.93
+        }).bindPopup(`
+          <strong>${station.id} — ${station.name}</strong><br>
+          Observed: ${Number.isFinite(observedTemp) ? `${observedTemp.toFixed(0)}°F` : 'Unavailable'}<br>
+          Wind: ${Number.isFinite(observedDirection) ? `${observedDirection.toFixed(0)}° at ` : ''}${Number.isFinite(observedWind) ? `${observedWind.toFixed(0)} kt` : 'Unavailable'}<br>
+          METAR: ${latest?.rawOb || latest?.rawText || 'Unavailable'}<br>
+          Model estimate: ${Number.isFinite(model?.temperature) ? `${model.temperature.toFixed(0)}°F` : 'Unavailable'}
+        `).addTo(observationLayer);
+
+        // Wind arrow points toward the direction the air is moving, hence wind-from direction + 180 degrees.
+        if (Number.isFinite(model?.windDirection)) {
+          const toward = (model.windDirection + 180) % 360;
+          L.marker([station.lat, station.lon], {
+            icon: L.divIcon({
+              className: 'wind-arrow',
+              html: `<span style="transform: rotate(${toward}deg)">↑</span>`,
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })
+          }).bindTooltip(
+            `${station.id} model wind: ${model.windDirection.toFixed(0)}° at ${model.windSpeed?.toFixed(0) || '?'} mph`,
+            { direction: 'top', offset: [0, -8] }
+          ).addTo(windLayer);
+        }
+
+        // Normalize a practical Arizona temperature domain of 25–115°F for the visual field.
+        if (Number.isFinite(model?.temperature)) {
+          heatPoints.push([station.lat, station.lon, Math.max(0, Math.min(1, (model.temperature - 25) / 90))]);
+        }
+      });
+
+      modelTemperatureLayer.setLatLngs(heatPoints);
+    }
+
+    function renderPrevious24(metarsByStation) {
+      const items = STATIONS.map(station => {
+        const reports = metarsByStation[station.id] || [];
+        const temperatures = reports.map(report => cToF(report.temp)).filter(Number.isFinite);
+        const winds = reports.map(report => Number(report.wspd)).filter(Number.isFinite);
+
+        if (!reports.length) {
+          return `<li><span class="station-code">${station.id}</span> — no usable 24-hour METAR records returned.</li>`;
+        }
+
+        return `
+          <li>
+            <span class="station-code">${station.id}</span> ${station.name}<br>
+            High ${temperatures.length ? `${Math.max(...temperatures).toFixed(0)}°F` : '—'} ·
+            Low ${temperatures.length ? `${Math.min(...temperatures).toFixed(0)}°F` : '—'} ·
+            Strongest sustained wind ${winds.length ? `${Math.max(...winds).toFixed(0)} kt` : '—'}
+          </li>
+        `;
+      }).join('');
+
+      document.getElementById('previous24').innerHTML = items;
+    }
+
+    function renderModelSummary(modelRows) {
+      const currentTemp = average(modelRows.map(row => row.temperature));
+      const futureTemp = average(modelRows.map(row => row.sixHourTemperature));
+      const currentWind = average(modelRows.map(row => row.windSpeed));
+      const direction = circularAverage(modelRows.map(row => row.windDirection));
+      const trend = Number.isFinite(currentTemp) && Number.isFinite(futureTemp)
+        ? (futureTemp - currentTemp >= 2 ? 'warming' : futureTemp - currentTemp <= -2 ? 'cooling' : 'little net temperature change')
+        : 'an unavailable temperature trend';
+
+      document.getElementById('modelSummary').innerHTML = `
+        <strong>Blended station signal:</strong> ${trend} over roughly six hours.<br>
+        Current station-average estimate: ${Number.isFinite(currentTemp) ? `${currentTemp.toFixed(0)}°F` : '—'};
+        six-hour estimate: ${Number.isFinite(futureTemp) ? `${futureTemp.toFixed(0)}°F` : '—'}.
+        Mean modeled wind: ${Number.isFinite(direction) ? `${direction.toFixed(0)}°` : '—'} at
+        ${Number.isFinite(currentWind) ? `${currentWind.toFixed(0)} mph` : '—'}.<br><br>
+        <strong>Cause/effect context:</strong> daytime heating generally increases boundary-layer mixing and can bring stronger winds aloft toward the surface; nighttime radiational cooling can reduce mixing and favor drainage flows in terrain. These are general physical tendencies, not a site-specific guarantee.
+      `;
+    }
+
+    // NWS requires a point lookup before its forecast URL is known.
+    async function getNwsForecast(station) {
+      const point = await fetchJson(`https://api.weather.gov/points/${station.lat},${station.lon}`);
+      const forecast = await fetchJson(point.properties.forecast);
+      const firstPeriod = forecast.properties.periods?.[0];
+      if (!firstPeriod) throw new Error(`No NWS period for ${station.id}`);
+      return { station, period: firstPeriod };
+    }
+
+    async function renderNwsForecasts() {
+      const results = await Promise.allSettled(STATIONS.map(getNwsForecast));
+      const html = results.map((result, index) => {
+        const station = STATIONS[index];
+        if (result.status !== 'fulfilled') {
+          return `<li><span class="station-code">${station.id}</span> — NWS forecast temporarily unavailable.</li>`;
+        }
+
+        const period = result.value.period;
+        return `
+          <li>
+            <span class="station-code">${station.id}</span> — <strong>${period.name}</strong>:
+            ${period.shortForecast}. ${period.temperature}°${period.temperatureUnit};
+            wind ${period.windSpeed || 'variable'} ${period.windDirection || ''}.
+          </li>
+        `;
+      }).join('');
+
+      document.getElementById('nwsForecasts').innerHTML = html;
+    }
+
+    // Representative locations provide concise West/Central/East national context without implying a complete CONUS analysis.
+    async function renderSynoptic() {
+      const regions = [
+        { label: 'Western CONUS', location: 'San Francisco Bay Area', lat: 37.77, lon: -122.42 },
+        { label: 'Central CONUS', location: 'Kansas City area', lat: 39.10, lon: -94.58 },
+        { label: 'Eastern CONUS', location: 'Washington, DC area', lat: 38.91, lon: -77.04 }
+      ];
+
+      const results = await Promise.allSettled(regions.map(async region => {
+        const point = await fetchJson(`https://api.weather.gov/points/${region.lat},${region.lon}`);
+        const forecast = await fetchJson(point.properties.forecast);
+        return { ...region, period: forecast.properties.periods?.[0] };
+      }));
+
+      document.getElementById('synoptic').innerHTML = results.map((result, index) => {
+        if (result.status !== 'fulfilled' || !result.value.period) {
+          return `<li><strong>${regions[index].label}</strong> — summary unavailable.</li>`;
+        }
+        const value = result.value;
+        return `
+          <li>
+            <strong>${value.label}</strong><br>
+            ${value.location}: ${value.period.shortForecast}; ${value.period.temperature}°${value.period.temperatureUnit},
+            wind ${value.period.windSpeed || 'variable'} ${value.period.windDirection || ''}.
+          </li>
+        `;
+      }).join('');
+    }
+
+    function renderCountyEffects() {
+      COUNTY_EFFECTS.forEach(effect => {
+        L.circleMarker([effect.lat, effect.lon], {
+          radius: 5,
+          color: '#65131b',
+          weight: 1,
+          fillColor: '#f7d8c6',
+          fillOpacity: 0.95
+        }).bindTooltip(effect.county, {
+          permanent: true,
+          direction: 'top',
+          className: 'county-bubble',
+          offset: [0, -6]
+        }).bindPopup(`<strong>${effect.county} County local effect</strong><br>${effect.text}`)
+          .addTo(countyLayer);
+      });
+    }
+
+    // Ranges are deliberately broad and approximate. The GeoJSON is held in a separate local static file.
+    async function loadRangeGeometry() {
+      try {
+        const data = await fetchJson('./data/az-ranges.geojson');
+        L.geoJSON(data, {
+          style: feature => ({
+            color: feature.properties.color || '#65131b',
+            weight: 2,
+            fillColor: feature.properties.color || '#65131b',
+            fillOpacity: 0.12,
+            dashArray: '6 5'
+          }),
+          onEachFeature: (feature, layer) => {
+            layer.bindPopup(`
+              <strong>${feature.properties.name}</strong><br>
+              ${feature.properties.note}<br><br>
+              <em>Illustrative only — not for navigation, clearance, or airspace determination.</em>
+            `);
+          }
+        }).eachLayer(layer => rangeLayer.addLayer(layer));
+      } catch (error) {
+        console.warn('Range geometry did not load:', error);
+      }
+    }
+
+    function configureControls() {
+      document.getElementById('obsToggle').addEventListener('change', event => {
+        if (event.target.checked) {
+          map.addLayer(observationLayer);
+          map.addLayer(windLayer);
+        } else {
+          map.removeLayer(observationLayer);
+          map.removeLayer(windLayer);
+        }
+      });
+
+      document.getElementById('modelToggle').addEventListener('change', event => {
+        event.target.checked ? map.addLayer(modelTemperatureLayer) : map.removeLayer(modelTemperatureLayer);
+      });
+
+      document.getElementById('radarToggle').addEventListener('change', event => {
+        event.target.checked ? map.addLayer(radarLayer) : map.removeLayer(radarLayer);
+      });
+
+      document.getElementById('rangesToggle').addEventListener('change', event => {
+        event.target.checked ? map.addLayer(rangeLayer) : map.removeLayer(rangeLayer);
+      });
+
+      document.getElementById('countyToggle').addEventListener('change', event => {
+        event.target.checked ? map.addLayer(countyLayer) : map.removeLayer(countyLayer);
+      });
+
+      document.getElementById('refreshButton').addEventListener('click', refreshDashboard);
+    }
+
+    async function refreshDashboard() {
+      const button = document.getElementById('refreshButton');
+      button.disabled = true;
+      button.textContent = 'Refreshing…';
+
+      try {
+        // METAR and model loads can run together because they are independent sources.
+        const [metarResult, modelResult] = await Promise.allSettled([loadMetars(), loadModels()]);
+
+        if (metarResult.status === 'fulfilled' && modelResult.status === 'fulfilled') {
+          renderMap(metarResult.value, modelResult.value);
+          renderPrevious24(metarResult.value);
+          renderModelSummary(modelResult.value);
+        } else {
+          if (metarResult.status !== 'fulfilled') {
+            setMessage('previous24', 'METAR feed is currently unavailable. Try refresh shortly.', true);
+          }
+          if (modelResult.status !== 'fulfilled') {
+            setMessage('modelSummary', 'Model feed is currently unavailable. The map may retain its last model field.', true);
+          }
+        }
+
+        // NWS panels are independent; a failure does not prevent the map from rendering.
+        await Promise.allSettled([renderNwsForecasts(), renderSynoptic()]);
+
+        document.getElementById('lastUpdated').textContent =
+          new Date().toLocaleString('en-US', {
+            timeZone: 'America/Phoenix',
+            dateStyle: 'medium',
+            timeStyle: 'short'
+          }) + ' MST';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Refresh live data';
+      }
+    }
+
+    async function initialize() {
+      const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+      document.getElementById('weatherFact').textContent = WEATHER_FACTS[dayOfYear % WEATHER_FACTS.length];
+
+      configureControls();
+      renderCountyEffects();
+      await loadRangeGeometry();
+      await refreshDashboard();
+
+      // Refresh data every 15 minutes while a visitor leaves the dashboard open.
+      window.setInterval(refreshDashboard, 15 * 60 * 1000);
+    }
+
+    initialize();
+  </script>
+</body>
+</html>
