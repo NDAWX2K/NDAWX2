@@ -272,7 +272,7 @@ function cloudLayers(points,cover,cape,elevation){
 }
 (() => {
   const e=id=>document.getElementById(id),finite=Number.isFinite;
-  const cache=new Map(),profileCache=new Map();let grid=null,layer=null,gridBusy=false,gridError='',profileVersion=0,activeProfile=null,activeLocation=[33.434,-112.012],retryAfter=0,profileBusy=false;
+  const cache=new Map(),profileCache=new Map();let grid=null,layer=null,gridBusy=false,gridError='',profileVersion=0,activeProfile=null,activeLocation=[33.434,-112.012],retryAfter=0,profileBusy=false,profileController=null,profileRequestKey='',profileTimer=0,inspectorVisible=false;
   const pct=v=>finite(v)?Math.round(v)+'%':'Unavailable',ft=z=>finite(z)?Math.round(z*3.28084/100)*100+' ft':'Unknown';
   const fresh=t=>finite(t)&&Math.abs(Date.now()/1000-t)<=5400;
   const pressure=()=>Number(e('cloudPressure').value);
@@ -280,7 +280,7 @@ function cloudLayers(points,cover,cape,elevation){
   function savedGrid(p){try{const d=JSON.parse(localStorage.getItem('ndawx-cloud-grid-v1-'+p)||'null');return d&&d.p===p&&Array.isArray(d.values)&&d.values.length===GRID.rows*GRID.cols&&Date.now()-d.fetched<3600000&&fresh(d.valid)?d:null}catch{return null}}
   function rememberGrid(data){try{localStorage.setItem('ndawx-cloud-grid-v1-'+data.p,JSON.stringify(data))}catch{}}
 
-  async function fetchCloud(url){if(Date.now()<retryAfter)throw Error('HRRR requests paused briefly after a service error; retry in '+Math.ceil((retryAfter-Date.now())/60000)+' min');const r=await fetch(url,{signal:AbortSignal.timeout(25000)});if(!r.ok){retryAfter=Date.now()+(r.status===429?300000:60000);throw Error(r.status===429?'HRRR request limit reached. Retry in 5 minutes.':'HRRR HTTP '+r.status)}const j=await r.json();if(j.error)throw Error(j.reason||'Cloud data unavailable');return j}
+  async function fetchCloud(url,signal){if(Date.now()<retryAfter)throw Error('HRRR requests paused briefly after a service error; retry in '+Math.ceil((retryAfter-Date.now())/60000)+' min');const timeout=AbortSignal.timeout(25000),requestSignal=signal?AbortSignal.any([signal,timeout]):timeout,r=await fetch(url,{signal:requestSignal});if(!r.ok){retryAfter=Date.now()+(r.status===429?300000:60000);throw Error(r.status===429?'HRRR request limit reached. Retry in 5 minutes.':'HRRR HTTP '+r.status)}const j=await r.json();if(j.error)throw Error(j.reason||'Cloud data unavailable');return j}
   const url=(pts,vars)=>'https://api.open-meteo.com/v1/forecast?'+new URLSearchParams({latitude:pts.map(p=>p[0]).join(','),longitude:pts.map(p=>p[1]).join(','),hourly:vars.join(','),models:'ncep_hrrr_conus',past_hours:'1',forecast_hours:'2',timeformat:'unixtime',timezone:'GMT',cell_selection:'nearest',elevation:pts.map(()=>'nan').join(',')});
   const selectedKeys=p=>['cloud_cover','cloud_cover_low','cloud_cover_mid','cloud_cover_high','temperature_'+p+'hPa','relative_humidity_'+p+'hPa','geopotential_height_'+p+'hPa','surface_pressure'];
   async function loadGrid(){
@@ -310,14 +310,31 @@ function cloudLayers(points,cover,cape,elevation){
     add('p','Type names are broad cloud-family candidates. RH thresholds, CAPE and broad height ranges do not identify visual cloud morphology. Thickness is a coarse moist-layer proxy, not a measured ceiling or cloud top.','forum-note');
     const table=add('table',null,'profile-table'),head=document.createElement('tr');for(const text of ['Pressure','Height MSL','Temp °C','RH','Screen']){const th=document.createElement('th');th.textContent=text;head.append(th)}table.append(head);for(const p of profile.points.filter(Boolean)){const row=document.createElement('tr');for(const text of [p.p+' hPa',ft(p.z),p.t.toFixed(1),Math.round(p.rh)+'%',iceScreen(p.t,p.rh,profile.cover,p.p,profile.sp)?'Potential icing':'No flag']){const td=document.createElement('td');td.textContent=text;row.append(td)}table.append(row)}
   }
-  async function inspect(lat,lon){activeLocation=[lat,lon];const version=++profileVersion,key=lat.toFixed(3)+','+lon.toFixed(3),cached=profileCache.get(key);if(cached&&Date.now()-cached.fetched<3600000&&fresh(cached.data.valid)){activeProfile=cached.data;renderProfile(activeProfile);return}if(Date.now()<retryAfter){e('cloudResult').textContent='HRRR profile temporarily unavailable. '+Math.ceil((retryAfter-Date.now())/60000)+' min until retry.';return}profileBusy=true;e('cloudResult').textContent='Loading point temperature/humidity profile…';try{const vars=['cloud_cover','cloud_cover_low','cloud_cover_mid','cloud_cover_high','surface_pressure','cape',...PROFILE_LEVELS.flatMap(p=>['temperature','relative_humidity','geopotential_height'].map(k=>k+'_'+p+'hPa'))];const d=await fetchCloud(url([[lat,lon]],vars)),data=profileOutput(d,lat,lon);if(profileCache.size>=30)profileCache.delete(profileCache.keys().next().value);profileCache.set(key,{data,fetched:Date.now()});if(version!==profileVersion)return;activeProfile=data;renderProfile(data)}catch(err){if(version===profileVersion){retryAfter=Math.max(retryAfter,Date.now()+60000);e('cloudResult').textContent='Profile unavailable: '+err.message+'. Cloud type, thickness and icing are unknown.'}}finally{profileBusy=false}}
+  async function loadProfile(lat,lon,key,version){
+    if(version!==profileVersion)return;
+    const controller=new AbortController();profileController=controller;profileRequestKey=key;profileBusy=true;
+    try{const vars=['cloud_cover','cloud_cover_low','cloud_cover_mid','cloud_cover_high','surface_pressure','cape',...PROFILE_LEVELS.flatMap(p=>['temperature','relative_humidity','geopotential_height'].map(k=>k+'_'+p+'hPa'))];const d=await fetchCloud(url([[lat,lon]],vars),controller.signal),data=profileOutput(d,lat,lon);if(profileCache.size>=30)profileCache.delete(profileCache.keys().next().value);profileCache.set(key,{data,fetched:Date.now()});if(version!==profileVersion)return;activeProfile=data;renderProfile(data)}
+    catch(err){if(version===profileVersion&&err.name!=='AbortError'){retryAfter=Math.max(retryAfter,Date.now()+60000);e('cloudResult').textContent='Profile unavailable: '+err.message+'. Cloud type, thickness and icing are unknown.'}}
+    finally{if(profileController===controller){profileController=null;profileRequestKey='';profileBusy=false}}
+  }
+  function inspect(lat,lon,force=false){
+    activeLocation=[lat,lon];const key=lat.toFixed(3)+','+lon.toFixed(3);
+    if(!force&&profileBusy&&profileRequestKey===key)return;
+    clearTimeout(profileTimer);profileTimer=0;profileController?.abort();profileController=null;profileRequestKey='';profileBusy=false;
+    const version=++profileVersion,cached=profileCache.get(key);
+    if(!force&&cached&&Date.now()-cached.fetched<3600000&&fresh(cached.data.valid)){activeProfile=cached.data;renderProfile(activeProfile);return}
+    if(Date.now()<retryAfter){e('cloudResult').textContent='HRRR profile temporarily unavailable. '+Math.ceil((retryAfter-Date.now())/60000)+' min until retry.';return}
+    e('cloudResult').textContent='Loading point temperature/humidity profile…';
+    profileTimer=setTimeout(()=>{profileTimer=0;loadProfile(lat,lon,key,version)},250);
+  }
   for(const [id,name,lat,lon]of STATIONS){const option=document.createElement('option');option.value=id;option.textContent=id+' · '+name;e('cloudPlace').append(option)}e('cloudPlace').value='KPHX';e('cloudPlace').onchange=()=>{const s=STATIONS.find(s=>s[0]===e('cloudPlace').value);if(s)inspect(s[2],s[3])};
   function enableClouds(){if(!e('cloudToggle').checked){e('cloudToggle').checked=true;e('cloudToggle').dispatchEvent(new Event('change',{bubbles:true}));return true}return false}
-  function refreshClouds(){const enabled=enableClouds();if(!enabled){cache.delete(pressure());try{localStorage.removeItem('ndawx-cloud-grid-v1-'+pressure())}catch{}loadGrid()}profileCache.clear();if(!profileBusy)inspect(...activeLocation)}
+  function refreshClouds(){const enabled=enableClouds();if(!enabled){cache.delete(pressure());try{localStorage.removeItem('ndawx-cloud-grid-v1-'+pressure())}catch{}loadGrid()}profileCache.clear();inspect(...activeLocation,true)}
   e('cloudToggle').onchange=()=>{redraw();if(e('cloudToggle').checked)loadGrid()};e('cloudMode').onchange=()=>{enableClouds();redraw();loadGrid()};e('cloudPressure').onchange=()=>{enableClouds();redraw();loadGrid()};e('cloudOpacity').oninput=redraw;e('cloudRefresh').onclick=refreshClouds;e('cloudMapRefresh').onclick=refreshClouds;
-  initLayer();redraw();if(e('cloudToggle').checked)loadGrid();inspect(...activeLocation);
-  setInterval(()=>{if(!document.hidden){if(e('cloudToggle').checked)loadGrid();if(activeProfile&&!fresh(activeProfile.valid))renderProfile(activeProfile);if(!profileBusy&&Date.now()>=retryAfter)inspect(...activeLocation);redraw()}},60000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){redraw();if(e('cloudToggle').checked)loadGrid();if(activeProfile&&!fresh(activeProfile.valid)&&!profileBusy)inspect(...activeLocation)}});
+  initLayer();redraw();if(e('cloudToggle').checked)loadGrid();
+  if('IntersectionObserver'in window){const observer=new IntersectionObserver(entries=>{inspectorVisible=entries.some(entry=>entry.isIntersecting);if(inspectorVisible)inspect(...activeLocation)},{rootMargin:'150px 0px'});observer.observe(e('cloudInspector'));e('cloudResult').textContent='Cloud profile loads when this inspector is opened.'}else inspect(...activeLocation);
+  setInterval(()=>{if(!document.hidden){if(e('cloudToggle').checked)loadGrid();if(activeProfile&&!fresh(activeProfile.valid))renderProfile(activeProfile);if(inspectorVisible&&activeProfile&&!fresh(activeProfile.valid)&&!profileBusy&&Date.now()>=retryAfter)inspect(...activeLocation);redraw()}},60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){redraw();if(e('cloudToggle').checked)loadGrid();if(inspectorVisible&&activeProfile&&!fresh(activeProfile.valid)&&!profileBusy)inspect(...activeLocation)}});
 })();
 
 </script>
