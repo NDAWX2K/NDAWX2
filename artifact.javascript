@@ -1,1 +1,0 @@
-const data = await fetchJson('./data/az-ranges.geojson');
